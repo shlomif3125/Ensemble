@@ -2,77 +2,37 @@ import pandas as pd
 import torch
 from torch import nn
 import pytorch_lightning as pl
-from .layer_utils import SelfAttention, Transpose
-    
+from .backbones import build_router_model    
 
-class MultiRouterModelV0(pl.LightningModule):
-    def __init__(self, model_names_list, 
-                 embed_dim=512, 
-                 outdim1=256, num_heads1=8, 
-                 outdim2=64, num_heads2=8, 
-                 avg_pool_out=3, outdim3=32,
-                 out_dim=16,
-                 lr=1e-4):
-        super(MultiRouterModelV0, self).__init__()
+class MultiRouterModel(pl.LightningModule):
+    def __init__(self, model_cfg):
+        super(MultiRouterModel, self).__init__()
+        self.cfg = model_cfg
 
-        module_dict = nn.ModuleDict({model_name: self.build_router_model(embed_dim=embed_dim, 
-                                                                         outdim1=outdim1, num_heads1=num_heads1,
-                                                                         outdim2=outdim2, num_heads2=num_heads2, 
-                                                                         avg_pool_out=avg_pool_out, outdim3=outdim3,
-                                                                         out_dim=out_dim) for model_name in model_names_list})
+        module_dict = nn.ModuleDict({model_name: build_router_model(model_cfg.backbone) 
+                                     for model_name in model_cfg.model_names_list})
         self.module_dict = module_dict
         
         self.loss = nn.BCEWithLogitsLoss()   
-        self.lr = lr     
-        self.validation_results_df = pd.DataFrame(columns=['tar_id', 'Model', 'RouterLabel', 'Score', 'we'])
-        
-    @staticmethod
-    def build_router_model(embed_dim=512, 
-                          outdim1=128, num_heads1=8,
-                          outdim2=64, num_heads2=8, 
-                          avg_pool_out=3, outdim3=32,
-                          out_dim=16):
-
-        unsqueeze0 = nn.Unflatten(1, [1, embed_dim])
-        conv0 = nn.Conv2d(1, 1, (5, 5), (2, 2))
-        squeeze0 = nn.Flatten(1, 2)
-        nl0 = nn.Mish()
-        outdim0 = (embed_dim - 5) // 2 + 1
-        
-        conv1 = nn.Conv1d(outdim0, outdim1, 5, 2)
-        nl1 = nn.Mish()
-        norm1 = nn.BatchNorm1d(outdim1)
-        sa1 = SelfAttention(outdim1, num_heads1, batch_first=True)
-        
-        conv2 = nn.Conv1d(outdim1, outdim2, 5, 2)
-        nl2 = nn.Mish()
-        norm2 = nn.BatchNorm1d(outdim2)
-        sa2 = SelfAttention(outdim2, num_heads2, batch_first=True, )
-        
-        avg_pool = nn.AdaptiveAvgPool1d(avg_pool_out)
-        conv3 = nn.Conv1d(outdim2, outdim3, avg_pool_out)
-        squeeze = nn.Flatten(-2, -1)
-        nl3 = nn.Mish()
-        
-        linear = nn.Linear(outdim3, out_dim)
-        last_linear = nn.Linear(out_dim, 1)
-        last_squeeze = nn.Flatten(0, -1)
-
-
-        layer0 = nn.Sequential(unsqueeze0, conv0, squeeze0, nl0)
-        layer1 = nn.Sequential(conv1, nl1, norm1, Transpose(1, 2), sa1, Transpose(1, 2))
-        layer2 = nn.Sequential(conv2, nl2, norm2, Transpose(1, 2), sa2, Transpose(1, 2))
-        layer_out = nn.Sequential(avg_pool, conv3, squeeze, nl3, linear, last_linear, last_squeeze)
-
-        model = nn.Sequential(layer0, layer1, layer2, layer_out)
-        return model
+        self.validation_results_df = pd.DataFrame(columns=['tar_id',
+                                                           'Model', 
+                                                           'RouterLabel',
+                                                           'Score', 
+                                                           'instruction_type', 
+                                                           'w',
+                                                           'we'])
 
     def forward(self, x, model_names):
-        out = torch.cat([self.module_dict[mn](x[i:i+1]) for i, mn in enumerate(model_names)], dim=0)
+        if len(set(model_names)) == 1:
+            m = self.module_dict[model_names[0]]
+            out = m(x)
+        else:
+            # TODO: group by model-name, and restore original order afterwards, to gain mini-batches utilization
+            out = torch.cat([self.module_dict[mn](x[i:i+1]) for i, mn in enumerate(model_names)], dim=0)
         return out
     
     def training_step(self, batch, batch_idx=0):
-        tar_ids, x, router_labels, model_names, wes = batch
+        _, x, router_labels, model_names, *_ = batch
         out = self.forward(x, model_names)
         loss = self.loss(out, router_labels.to(torch.float32))
         self.log('loss', loss)
@@ -81,30 +41,46 @@ class MultiRouterModelV0(pl.LightningModule):
     def on_validation_start(self):
         self.validation_results_df = self.validation_results_df.iloc[:0]
         
-    def validation_step(self, batch, batch_idx=0):
-        tar_ids, x, router_labels, model_names, wes = batch
+    def validation_step(self, batch, batch_idx=0, dataloader_idx=0):
+        tar_ids, x, router_labels, model_names, instruction_types, ws, wes = batch
         out = self.forward(x, model_names)
         loss = self.loss(out, router_labels.to(torch.float32))
-        self.log('val_loss', loss)
+        self.log('val_loss', loss, add_dataloader_idx=False)
         
         router_labels = router_labels.cpu().detach().numpy()
         scores = nn.Sigmoid()(out).cpu().detach().numpy()
+        ws = ws.cpu().detach().numpy()
         wes = wes.cpu().detach().numpy()
-        ['tar_id', 'Model', 'RouterLabel', 'Score', 'we']
         batch_size = len(tar_ids)
         batch_rows = [dict(tar_id=tar_ids[i], 
                            Model=model_names[i], 
                            RouterLabel=router_labels[i], 
                            Score=scores[i],
+                           instruction_type=instruction_types[i],
+                           w=ws[i],
                            we=wes[i]) 
                       for i in range(batch_size)]
         batch_val_df = pd.DataFrame(batch_rows)
         self.validation_results_df = pd.concat([self.validation_results_df, batch_val_df])
         
         return loss
+
+    @staticmethod
+    def calc_wer(w_we_df):
+        return w_we_df['we'].sum() / w_we_df['w'].sum()
+    
+    #TODO: This waits for all validation-dataloader to finish, which is suboptimal. 
+    def on_validation_epoch_end(self):
+        self.validation_results_df = self.validation_results_df.reset_index(drop=True)
+        validation_results_df = self.validation_results_df
+        best_model_per_tar_id_df = validation_results_df.loc[validation_results_df.groupby('tar_id')['Score'].idxmax(), ['instruction_type', 'w', 'we']]
+        instruction_type_wers = best_model_per_tar_id_df.groupby('instruction_type').apply(self.calc_wer).to_dict()
+        for k, v in instruction_type_wers.items():
+            self.log(f'val_{k}_wer_by_chosen_model', v)
+        
     
     def configure_optimizers(self):
-        opt = torch.optim.Adam(self.parameters(), self.lr)
+        opt = torch.optim.Adam(self.parameters(), self.cfg.optim.lr)
         return opt
 
     

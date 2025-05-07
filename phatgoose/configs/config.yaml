@@ -1,0 +1,86 @@
+manifests_dir: /mnt/ML/Personalized/shlomi.fenster/Onboarding/Ensemble/Data
+main_exps_dir: /mnt/ML/ModelsTrainResults/shlomi.fenster/Ensemble/PHATGOOSE
+exp_name: test1
+
+model:
+  model_names_list: 
+    - asaf_kagan_20250226
+    - avi_barliya_20250312
+    - aviad_maizels_20250312
+    - bamboo_sleeper_20250312
+    - christopher_gray_20250312
+    - daniel_asherov_20250224
+    - dennis_fuentes_20250312
+    - diver_express_20250312
+    - doron_gazit_20250225
+    - eran_roll_20250312
+    - face_body_20250312
+    - guy_maich_20250312
+    - leonid_pakman_20250312
+    - lodge_kudzu_20250312
+    - merry_reef_20250312
+    - natural_buyout_20250312
+    - nila_ko_20250312
+    - rani_alon_20250302
+    - sourabh_katare_20250312
+    - tributary_glowing_20250312
+    - truss_odious_20250312
+    - university_toasted_20250312
+    - viva_press_20250312
+    - wendy_tan_20250312
+    - yonatan_wexler_20250302
+  backbone:
+    embed_dim: 512
+    outdim1: 256
+    num_heads1: 8
+    outdim2: 64
+    num_heads2: 8
+    avg_pool_out: 3
+    outdim3: 32
+    out_dim: 16
+  optim:
+    lr: 1e-4
+
+data:
+  num_workers: 12
+  pin_memory: true
+  train:
+    manifest_filepath: ${manifests_dir}/tmp_data.pkl
+    labeling: HardBinaryRouterLabels
+    max_sample_wer: 0.5
+    shuffle: True
+    batch_size: 64
+    use_mini_batch_per_model: True
+    per_model_mini_batch_size: 8
+    num_models_per_batch: 8
+
+  validation:
+    batch_size: 64
+    val_sets:
+    - name: loud
+      manifest_filepath: ${manifests_dir}/tmp_data_${.name}.pkl
+      labeling: ${data.train.labeling}
+      max_sample_wer: 1.
+      shuffle: False
+      batch_size: ${data.validation.batch_size}
+
+    - name: lip
+      manifest_filepath: ${manifests_dir}/tmp_data_${.name}.pkl
+      labeling: ${data.train.labeling}
+      max_sample_wer: 1.
+      shuffle: False
+      batch_size: ${data.validation.batch_size}
+
+    - name: silent
+      manifest_filepath: ${manifests_dir}/tmp_data_${.name}.pkl
+      labeling: ${data.train.labeling}
+      max_sample_wer: 1.
+      shuffle: False
+      batch_size: ${data.validation.batch_size}
+
+trainer:
+  max_epochs: 2
+  max_steps: 300
+  val_check_interval: 100
+  log_every_n_steps: 100
+  exp_dir: ${main_exps_dir}/${exp_name}
