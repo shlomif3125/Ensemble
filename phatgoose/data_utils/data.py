@@ -1,5 +1,6 @@
 import random
 import pandas as pd
+import numpy as np
 import torch
 from torch.utils.data import Dataset
 
@@ -8,18 +9,27 @@ class MultiRouterDataset(Dataset):
     def __init__(self, data_cfg):
         self.cfg = data_cfg
         self.dataset_df = self.create_dataset_df()
+        self.filter_dataset_df()
         self.model_names_list = sorted(set(self.dataset_df['Model']))
+        
+    def filter_dataset_df(self):
+        model_names = self.cfg.get('model_names', None)
+        if model_names is not None:
+            if type(model_names) == str:
+                model_names = [model_names]
+            model_names.append(self.cfg.baseline_model_name)
+            self.dataset_df = self.dataset_df[self.dataset_df['Model'].isin(model_names)]
         
     def create_dataset_df(self):
         df = pd.read_pickle(self.cfg.manifest_filepath)
-        baseline_model_df = df[df['Model'] == 'baseline_model_200K']
-        df = df[df['Model'] != 'baseline_model_200K']
+        baseline_model_df = df[df['Model'] == self.cfg.baseline_model_name]
+        df = df[df['Model'] != self.cfg.baseline_model_name]
         tar_id_to_baseline_we = baseline_model_df.set_index('tar_id')['we'].to_dict()
         df['baseline_we'] = df['tar_id'].map(tar_id_to_baseline_we)
         if self.cfg.labeling == 'HardBinaryRouterLabels':
             df['RouterLabel'] = (df['we'] < df['baseline_we']).astype(int)
             
-            dataset_columns = ['tar_id', 'w', 'Model', 'we', 'instruction_type', 'RouterLabel']
+            dataset_columns = ['tar_id', 'features_path', 'w', 'Model', 'we', 'instruction_type', 'RouterLabel', 'baseline_we']
             df = df[dataset_columns]
 
             df = df[((df['RouterLabel'] == 1) &
@@ -35,19 +45,32 @@ class MultiRouterDataset(Dataset):
         return df        
 
     def __len__(self):
-        return len(self.dataset_df)
+        len_ = self.cfg.get('len_', None)
+        if len_ is not None:
+            return len_
+        
+        num_samples = len(self.dataset_df)
+        if self.cfg.get('use_mini_batch_per_model', False):
+            num_models_per_batch = self.cfg.num_models_per_batch            
+            per_model_mini_batch_size = self.cfg.per_model_mini_batch_size
+            full_batch_size = num_models_per_batch * per_model_mini_batch_size 
+            return num_samples // full_batch_size
+        else:
+            return num_samples
     
     @staticmethod
     def get_sample_from_row(row):
         tar_id = row['tar_id']
-        # x = torch.tensor(np.load(row['input_tensor_path']), dtype=torch.float32)
-        x = torch.rand(512, random.randint(100, 499), dtype=torch.float32)
+        x = torch.tensor(np.load(row['features_path']), dtype=torch.float32)
+        x = x.T  # TODO: This needs to be configurable!!!
+        # x = torch.rand(512, random.randint(100, 499), dtype=torch.float32)
         router_label = torch.tensor(row['RouterLabel']).to(torch.int32)
         model_name = row['Model']
         instruction_type = row['instruction_type']
         w = torch.tensor(row['w']).to(torch.int32)
         we = torch.tensor(row['we']).to(torch.int32)
-        return tar_id, x, router_label, model_name, instruction_type, w, we
+        baseline_we = torch.tensor(row['baseline_we']).to(torch.float32)
+        return tar_id, x, router_label, model_name, instruction_type, w, we, baseline_we
 
 
     def __getitem__(self, idx):
@@ -75,7 +98,7 @@ class MultiRouterDataset(Dataset):
     
     @staticmethod
     def collate_fn(batch):
-        tar_id, x, router_label, model_name, instruction_type, w, we = zip(*batch)
+        tar_id, x, router_label, model_name, instruction_type, w, we, baseline_we = zip(*batch)
 
         dim_0 = x[0].shape[0]
         max_size = max(x_.shape[1] for x_ in x)
@@ -83,46 +106,14 @@ class MultiRouterDataset(Dataset):
         router_label = torch.stack(router_label)
         w = torch.stack(w)
         we = torch.stack(we)
-        return tar_id, x, router_label, model_name, instruction_type, w, we
-
-
-class MultiRouterDatasetV0(Dataset):
-    def __init__(self, dataset_df):
-        self.dataset_df = dataset_df
-
-    def __len__(self):
-        return len(self.dataset_df)
-
-    def __getitem__(self, idx):
-        row = self.dataset_df.iloc[idx]
-        tar_id = row['tar_id']
-        # x = torch.tensor(np.load(row['input_tensor_path']), dtype=torch.float32)
-        x = torch.rand(512, random.randint(100, 499), dtype=torch.float32)
-        router_label = torch.tensor(row['RouterLabel']).to(torch.int32)
-        model_name = row['Model']
-        instruction_type = row['instruction_type']
-        w = torch.tensor(row['w']).to(torch.int32)
-        we = torch.tensor(row['we']).to(torch.int32)
-
-        return tar_id, x, router_label, model_name, instruction_type, w, we
-
-    @staticmethod
-    def collate_fn(batch):
-        tar_id, x, router_label, model_name, instruction_type, w, we = zip(*batch)
-
-        dim_0 = x[0].shape[0]
-        max_size = max(x_.shape[1] for x_ in x)
-        x = torch.stack([torch.cat([x_, torch.zeros((dim_0, max_size - x_.shape[1]))], dim=1) for x_ in x], dim=0)
-        router_label = torch.stack(router_label)
-        w = torch.stack(w)
-        we = torch.stack(we)
-        return tar_id, x, router_label, model_name, instruction_type, w, we
+        baseline_we = torch.stack(baseline_we)
+        return tar_id, x, router_label, model_name, instruction_type, w, we, baseline_we
 
 
 if __name__ == '__main__':
     import pandas as pd
     dataset_df = pd.read_pickle('router_dataset_v1.pkl')
-    ds = MultiRouterDatasetV0(dataset_df)
+    ds = MultiRouterDataset(dataset_df)
     tar_id, x, router_label, model_name, instruction_type, w, we = ds[0]
 
 

@@ -4,9 +4,13 @@ sys.path.append('/home/shlomi.fenster/MyNeMo/q-NeMo')
 import pandas as pd
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl
+from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 from data_utils.data import MultiRouterDataset
 from model_utils.models import MultiRouterModel
 from nemo.core.config import hydra_runner
+from omegaconf import OmegaConf, DictConfig, open_dict
+OmegaConf.register_new_resolver("eval", eval)
+
 
 
 @hydra_runner(config_path="../configs", config_name="config")
@@ -25,21 +29,49 @@ def main(cfg):
                           num_workers=data_cfg.num_workers, pin_memory=data_cfg.pin_memory)
 
     val_dls = []
-    for val_cfg in data_cfg.validation.val_sets:
-        val_ds = MultiRouterDataset(val_cfg)
-        val_dl = DataLoader(val_ds, val_cfg.batch_size, collate_fn=train_ds.collate_fn, shuffle=False, drop_last=False, 
-                              num_workers=data_cfg.num_workers, pin_memory=data_cfg.pin_memory)
-        val_dls.append(val_dl)
+    val_dl_names = []
+    val_dl_types = []
+    
+    val_cfg = data_cfg.validation
+    val_ds = MultiRouterDataset(val_cfg)
+    val_dl = DataLoader(val_ds, val_cfg.batch_size, collate_fn=train_ds.collate_fn, shuffle=False, drop_last=False, 
+                            num_workers=data_cfg.num_workers, pin_memory=data_cfg.pin_memory)
+    val_dls.append(val_dl)
+    val_dl_names.append('val')
+    val_dl_types.append('val')
+    
+    for test_cfg in data_cfg.test.test_sets:
+        test_ds = MultiRouterDataset(test_cfg)
+        test_dl = DataLoader(test_ds, val_cfg.batch_size, collate_fn=train_ds.collate_fn, shuffle=False, drop_last=False, 
+                             num_workers=data_cfg.num_workers, pin_memory=data_cfg.pin_memory)
+        val_dls.append(test_dl)
+        val_dl_names.append(test_cfg.name)
+        val_dl_types.append('test')
 
+    model_cfg = cfg.model
+    with open_dict(model_cfg):
+        model_cfg.val_dl_names = val_dl_names
+        model_cfg.val_dl_types = val_dl_types
+        
+        model_names = data_cfg.get('model_names', None)
+        if model_names is not None:
+            if type(model_names) == str:
+                model_names = [model_names]
+        else:
+            model_names = sorted(set(train_ds.dataset_df['Model']))
+            
+        model_cfg.model_names_list = model_names            
 
     multi_router_model = MultiRouterModel(cfg.model)
 
     trainer_cfg = cfg.trainer
     logger = pl.loggers.TensorBoardLogger(save_dir=trainer_cfg.exp_dir)
+    callbacks = [ModelCheckpoint(**trainer_cfg.checkpoint_callback_params),
+                 LearningRateMonitor()]
     trainer = pl.Trainer(max_epochs=trainer_cfg.max_epochs, max_steps=trainer_cfg.max_steps, 
                          val_check_interval=trainer_cfg.val_check_interval, 
                          log_every_n_steps=trainer_cfg.log_every_n_steps,
-                         logger=logger)
+                         logger=logger, callbacks=callbacks)
 
     trainer.fit(multi_router_model, train_dl, val_dls)
     

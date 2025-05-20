@@ -1,13 +1,14 @@
+
 manifests_dir: /mnt/ML/Personalized/shlomi.fenster/Onboarding/Ensemble/Data/one_million_data
-main_exps_dir: /mnt/ML/ModelsTrainResults/shlomi.fenster/Ensemble/PHATGOOSE
-exp_name: single_model_train_11/${data.model_names}__LR_${model.optim.lr}__Backbone_${model.backbone.type}__AccumBatch_${trainer.accumulate_grad_batches}
+main_exps_dir: /mnt/ML/ModelsTrainResults/shlomi.fenster/Ensemble/PHATGOOSE/single_model_train_with_features_from_layer_${data.features_from_layer}/
+exp_name: exp_1/${data.model_names}__LR_${model.optim.lr}__Backbone_${model.backbone.type}__AccumBatch_${trainer.accumulate_grad_batches}
 
 model:
   backbone:
-    type: resnet
-    embed_dim: 512
-    outdim1: 256
-    outdim2: 672
+    type: resnet_inner_layers
+    embed_dim: 1024
+    outdim1: 672
+    outdim2: 56
     # num_heads1: 8
     # outdim2: 64
     # num_heads2: 8
@@ -23,9 +24,10 @@ data:
   num_workers: 12
   batch_size: 32
   pin_memory: true
+  features_from_layer: 11
   train:
     len_: 100000
-    manifest_filepath: ${manifests_dir}/train.pkl
+    manifest_filepath: ${manifests_dir}/train_sub100k__model_${data.model_names}__layer_${data.features_from_layer}_features.pkl
     model_names: ${data.model_names}
     baseline_model_name: ${data.baseline_model_name}
     labeling: HardBinaryRouterLabels
@@ -37,7 +39,7 @@ data:
     num_models_per_batch: 1  # 8
 
   validation:
-    manifest_filepath: ${manifests_dir}/val.pkl
+    manifest_filepath: ${manifests_dir}/val__model_${data.model_names}__layer_${data.features_from_layer}_features.pkl
     model_names: ${data.model_names}
     baseline_model_name: ${data.baseline_model_name}
     labeling: ${data.train.labeling}
@@ -50,7 +52,7 @@ data:
     batch_size: ${data.validation.batch_size}
     test_sets:
     - name: loud
-      manifest_filepath: ${manifests_dir}/test_${.name}.pkl
+      manifest_filepath: ${manifests_dir}/test_${.name}__model_${data.model_names}__layer_${data.features_from_layer}_features.pkl
       model_names: ${data.model_names}
       baseline_model_name: ${data.baseline_model_name}
       labeling: ${data.train.labeling}
@@ -59,7 +61,7 @@ data:
       batch_size: ${data.test.batch_size}
 
     - name: lip
-      manifest_filepath: ${manifests_dir}/test_${.name}.pkl
+      manifest_filepath: ${manifests_dir}/test_${.name}__model_${data.model_names}__layer_${data.features_from_layer}_features.pkl
       model_names: ${data.model_names}
       baseline_model_name: ${data.baseline_model_name}
       labeling: ${data.train.labeling}
@@ -68,7 +70,7 @@ data:
       batch_size: ${data.test.batch_size}
 
     - name: silent
-      manifest_filepath: ${manifests_dir}/test_${.name}.pkl
+      manifest_filepath: ${manifests_dir}/test_${.name}__model_${data.model_names}__layer_${data.features_from_layer}_features.pkl
       model_names: ${data.model_names}
       baseline_model_name: ${data.baseline_model_name}
       labeling: ${data.train.labeling}
@@ -78,15 +80,15 @@ data:
 
 
 trainer:
-  max_epochs: 100
-  max_steps: 1000000
-  val_check_interval: 10000
+  max_epochs: 10
+  max_steps: 100000
+  val_check_interval: 1000
   log_every_n_steps: 100
   exp_dir: ${main_exps_dir}/${exp_name}
   accumulate_grad_batches: 16
   checkpoint_callback_params:
     dirpath: ${trainer.exp_dir}/checkpoints
-    every_n_train_steps: 10000
+    every_n_train_steps: 1000 
     every_n_epochs: null
     monitor: val_ThresholdedTopScoringRouterChoice/silent
     mode: min
@@ -109,11 +111,13 @@ hydra:
 
   sweeper:
     params:  # place all the parameters you wish to search over here (corresponding to the rest of the config)
-      data.model_names: asaf_kagan, avi_barliya, aviad_maizels, bamboo_sleeper #christopher_gray,daniel_asherov #,dennis_fuentes,diver_express,doron_gazit,eran_roll,face_body,guy_maich,leonid_pakman,lodge_kudzu,merry_reef,natural_buyout,nila_ko,rani_alon,sourabh_katare,tributary_glowing,truss_odious,university_toasted,viva_press,wendy_tan,yonatan_wexler
+      data.model_names: natural_buyout, aviad_maizels # asaf_kagan, avi_barliya, aviad_maizels, bamboo_sleeper #christopher_gray,daniel_asherov #,dennis_fuentes,diver_express,doron_gazit,eran_roll,face_body,guy_maich,leonid_pakman,lodge_kudzu,merry_reef,natural_buyout,nila_ko,rani_alon,sourabh_katare,tributary_glowing,truss_odious,university_toasted,viva_press,wendy_tan,yonatan_wexler
       data.train.num_models_per_batch: 1
       data.train.per_model_mini_batch_size: 64
-      model.optim.lr: 1e-6, 1e-4, 1e-5
+      model.optim.lr: 1e-4, 1e-5
       trainer.accumulate_grad_batches: 1, 4, 16
+      data.features_from_layer: 0, 11
+
 
 
   # Arguments to the hyperparameter runner
@@ -125,7 +129,7 @@ hydra:
     tasks_per_node: 1 
     qos: normal
     timeout_min: 6000  # 10 hours is enough for my purposes...
-    name: simple_phatgoose_single_model_11
+    name: exp_1
     submitit_folder: /mnt/ML/Personalized/shlomi.fenster/slurm_logs/NeMo/Ensemble/PHATGOOSE/${hydra.launcher.name}
 
     array_parallelism: 24
