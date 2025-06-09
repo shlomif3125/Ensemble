@@ -1,10 +1,10 @@
 
 manifests_dir: /mnt/ML/Personalized/shlomi.fenster/Onboarding/Ensemble/Data/one_million_data
 main_exps_dir: /mnt/ML/ModelsTrainResults/shlomi.fenster/Ensemble/PHATGOOSE/
-exp_group: single_model_train_fixed_we
-exp_num: 0
+exp_group: unified_models_thing
+exp_num: 2
 # exp_name: ${data.model_names}__layer_${data.features_from_layer}__LR_${model.optim.lr}__Backbone_${model.backbone.type}__NumSA_${model.backbone.num_self_attention_layers}__AccumBatch_${trainer.accumulate_grad_batches}
-exp_name: ${data.model_names}__layer_${data.features_from_layer}__LR_${model.optim.lr}__Backbone_${model.backbone.type}__AccumBatch_${trainer.accumulate_grad_batches}
+exp_name: ${list_of_strings_to_string:${data.model_names}}__layer_${data.features_from_layer}__LR_${model.optim.lr}__Backbone_${model.backbone.type}__AccumBatch_${trainer.accumulate_grad_batches}
 full_exp_name: ${exp_group}/exp_${exp_num}/${exp_name}
 
 model:
@@ -20,7 +20,12 @@ model:
     lr: 1e-5
 
 data:
-  model_names: asaf_kagan
+  model_names: 
+  - asaf_kagan
+  - aviad_maizels
+  - natural_buyout
+  - tributary_glowing
+  unify_models: true
   baseline_model_name: baseline_model
   num_workers: 12
   batch_size: 32
@@ -31,54 +36,36 @@ data:
     len_: 100000
     manifest_filepath: ${manifests_dir}/train__model_${data.features_from_model}__layer_${data.features_from_layer}_features.pkl
     model_names: ${data.model_names}
+    unify_models: ${data.unify_models}
     baseline_model_name: ${data.baseline_model_name}
     labeling: HardBinaryRouterLabels
     max_sample_wer: 0.5
     shuffle: True
     batch_size: 64
     use_mini_batch_per_model: True
-    per_model_mini_batch_size: 32  # 8
+    per_model_mini_batch_size: 64  # 8
     num_models_per_batch: 1  # 8
 
   validation:
     manifest_filepath: ${manifests_dir}/val__model_${data.features_from_model}__layer_${data.features_from_layer}_features.pkl
     model_names: ${data.model_names}
+    unify_models: ${data.unify_models}
     baseline_model_name: ${data.baseline_model_name}
     labeling: ${data.train.labeling}
     max_sample_wer: 1.
     shuffle: False
     num_workers: ${data.num_workers}
-    batch_size: 32
+    batch_size: 64
 
   test:
     batch_size: ${data.validation.batch_size}
-    test_sets:
-    - name: loud
-      manifest_filepath: ${manifests_dir}/test_${.name}__model_${data.features_from_model}__layer_${data.features_from_layer}_features__subsample_30000_per_it.pkl
-      model_names: ${data.model_names}
-      baseline_model_name: ${data.baseline_model_name}
-      labeling: ${data.train.labeling}
-      max_sample_wer: 1.
-      shuffle: False
-      batch_size: ${data.test.batch_size}
-
-    - name: lip
-      manifest_filepath: ${manifests_dir}/test_${.name}__model_${data.features_from_model}__layer_${data.features_from_layer}_features__subsample_30000_per_it.pkl
-      model_names: ${data.model_names}
-      baseline_model_name: ${data.baseline_model_name}
-      labeling: ${data.train.labeling}
-      max_sample_wer: 1.
-      shuffle: False
-      batch_size: ${data.test.batch_size}
-
-    - name: silent
-      manifest_filepath: ${manifests_dir}/test_${.name}__model_${data.features_from_model}__layer_${data.features_from_layer}_features__subsample_30000_per_it.pkl
-      model_names: ${data.model_names}
-      baseline_model_name: ${data.baseline_model_name}
-      labeling: ${data.train.labeling}
-      max_sample_wer: 1.
-      shuffle: False
-      batch_size: ${data.test.batch_size}
+    manifest_filepath: ${manifests_dir}/test__model_${data.features_from_model}__layer_${data.features_from_layer}_features_25k__NEW.pkl
+    model_names: ${data.model_names}
+    unify_models: ${data.unify_models}
+    baseline_model_name: ${data.baseline_model_name}
+    labeling: ${data.train.labeling}
+    max_sample_wer: 1.
+    shuffle: False
 
 
 trainer:
@@ -117,13 +104,15 @@ hydra:
     # shuffle: true
     params:  # place all the parameters you wish to search over here (corresponding to the rest of the config)
       # data.model_names: natural_buyout, aviad_maizels, asaf_kagan, avi_barliya, aviad_maizels, bamboo_sleeper, christopher_gray,daniel_asherov #,dennis_fuentes,diver_express,doron_gazit,eran_roll,face_body,guy_maich,leonid_pakman,lodge_kudzu,merry_reef,natural_buyout,nila_ko,rani_alon,sourabh_katare,tributary_glowing,truss_odious,university_toasted,viva_press,wendy_tan,yonatan_wexler
-      data.model_names: asaf_kagan, aviad_maizels, natural_buyout, tributary_glowing
+      # data.model_names: asaf_kagan, aviad_maizels, natural_buyout, tributary_glowing
+     
       data.train.num_models_per_batch: 1
       data.train.per_model_mini_batch_size: 64
-      model.optim.lr: 1e-4, 1e-5
-      trainer.accumulate_grad_batches: 1, 4, 16
+      model.optim.lr: 1e-4 #, 1e-5
+      trainer.accumulate_grad_batches: 16 # , 4, 1
       data.features_from_layer: 0, 11
-      # model.backbone.num_self_attention_layers: 1, 2
+     
+#       # model.backbone.num_self_attention_layers: 1, 2
 
 
 
@@ -136,8 +125,8 @@ hydra:
     tasks_per_node: 1 
     qos: normal
     timeout_min: 6000  # 10 hours is enough for my purposes...
-    # name: ${exp_name}
-    name: ${hydra.job.override_dirname}
+    name: ${exp_name}
+    # name: ${hydra.job.override_dirname}
     submitit_folder: /mnt/ML/Personalized/shlomi.fenster/slurm_logs/NeMo/Ensemble/PHATGOOSE/${hydra.launcher.name}
 
     array_parallelism: 24
