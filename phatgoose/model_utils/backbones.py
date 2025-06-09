@@ -42,7 +42,6 @@ def build_router_model(router_model_cfg):
         layer_out = nn.Sequential(avg_pool, conv3, squeeze, nl3, linear, last_linear, last_squeeze)
 
         model = nn.Sequential(layer0, layer1, layer2, layer_out)
-        return model
     
     elif router_model_cfg.type == 'resnet':
         time_norm = nn.InstanceNorm1d(router_model_cfg.embed_dim)
@@ -67,8 +66,27 @@ def build_router_model(router_model_cfg):
                               avg_pool, nl3, unflatten, 
                               res18, nl4,
                               linear)#, flatten)
-        return model
     
+    elif router_model_cfg.type == 'attention_inner_layers':
+        outdim = router_model_cfg.outdim1
+        num_heads = router_model_cfg.num_heads1
+        transpose_layer = Transpose(1, 2)
+        num_self_attention_layers = router_model_cfg.num_self_attention_layers
+        stem = nn.Sequential(nn.Conv1d(1024, outdim, 1), nn.LeakyReLU(), transpose_layer)
+        model_layers = [stem]
+        for _ in range(num_self_attention_layers):
+            layer = nn.Sequential(SelfAttention(outdim, num_heads, batch_first=True), 
+                                nn.Mish(), 
+                                transpose_layer,
+                                nn.Conv1d(outdim, outdim, 5, 2, groups=outdim),
+                                nn.LeakyReLU(),
+                                transpose_layer)
+            model_layers.append(layer)
+
+        out_layer = nn.Sequential(transpose_layer, nn.AdaptiveAvgPool1d(1), nn.Flatten(), nn.Linear(outdim, 64), nn.LeakyReLU(), nn.Linear(64, 2))
+        model_layers.append(out_layer)
+        model = nn.Sequential(*model_layers)
+            
     elif router_model_cfg.type == 'resnet_inner_layers':
         # time_norm = nn.InstanceNorm1d(router_model_cfg.embed_dim)
         
@@ -94,6 +112,9 @@ def build_router_model(router_model_cfg):
                               unflatten, flatten, upsample,
                               res18, nl3,
                               linear)#, flatten)
-        return model
+    else:
+        raise NotImplementedError(f"No known backbone implementation for type {router_model_cfg.type}")
+    
+    return model
 
     

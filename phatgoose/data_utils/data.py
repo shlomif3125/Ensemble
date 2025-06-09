@@ -3,31 +3,56 @@ import pandas as pd
 import numpy as np
 import torch
 from torch.utils.data import Dataset
+import logging
 
 
 class MultiRouterDataset(Dataset):
     def __init__(self, data_cfg):
         self.cfg = data_cfg
-        self.dataset_df = self.create_dataset_df()
+        logging.info('Loading Manifest File')
+        self.dataset_df = pd.read_pickle(self.cfg.manifest_filepath)
+        
+        logging.info(f'Filtering dataset for model names {self.cfg.get("model_names", None)}')
         self.filter_dataset_df()
+        
+        logging.info('Processing Dataset')
+        self.process_dataset_df()
+        
         self.model_names_list = sorted(set(self.dataset_df['Model']))
+        logging.info(f'END OF INIT model_names_list: {self.model_names_list}')
         
     def filter_dataset_df(self):
         model_names = self.cfg.get('model_names', None)
+
         if model_names is not None:
             if type(model_names) == str:
                 model_names = [model_names]
             model_names.append(self.cfg.baseline_model_name)
             self.dataset_df = self.dataset_df[self.dataset_df['Model'].isin(model_names)]
+            
+    def unify_models(self, df):
+        print('UNIFYING MODELS')
+        unified_model_name = '__'.join(sorted(set(df['Model'])))
+        df = df.reset_index()
+        idx = df.groupby('tar_id')['we'].idxmin()
+        df = df.loc[idx].reset_index(drop=True)
+        df['Model'] = unified_model_name
+        self.model_names_list = [unified_model_name]
+        return df
         
-    def create_dataset_df(self):
-        df = pd.read_pickle(self.cfg.manifest_filepath)
+        
+    def process_dataset_df(self):
+        df = self.dataset_df
         baseline_model_df = df[df['Model'] == self.cfg.baseline_model_name]
         df = df[df['Model'] != self.cfg.baseline_model_name]
         tar_id_to_baseline_we = baseline_model_df.set_index('tar_id')['we'].to_dict()
         df['baseline_we'] = df['tar_id'].map(tar_id_to_baseline_we)
+        
+        if self.cfg.get('unify_models', False):
+            df = self.unify_models(df)
+        
         if self.cfg.labeling == 'HardBinaryRouterLabels':
-            df['RouterLabel'] = (df['we'] < df['baseline_we']).astype(int)
+            df['RouterLabel'] = (df['we'] < df['baseline_we']).astype(int)  # TODO: add we-difference buffer for less noisy labels
             
             dataset_columns = ['tar_id', 'features_path', 'w', 'Model', 'we', 'instruction_type', 'RouterLabel', 'baseline_we']
             df = df[dataset_columns]
@@ -35,14 +60,34 @@ class MultiRouterDataset(Dataset):
             df = df[((df['RouterLabel'] == 1) &
                      ((df['we'] / df['w']) < self.cfg.max_sample_wer)) |
                     (df['RouterLabel'] == 0)]
+             
+            # tar_id_has_good_model = df.groupby('tar_id')['RouterLabel'].max() == 1
+            # no_good_model_tar_ids = tar_id_has_good_model[~tar_id_has_good_model].index.to_list()
+            # df = df[~df['tar_id'].isin(no_good_model_tar_ids)]
+            
+        elif self.cfg.labeling == 'HardBinaryRouterLabelsWithBuffer':
 
-            tar_id_has_good_model = df.groupby('tar_id')['RouterLabel'].max() == 1
-            no_good_model_tar_ids = tar_id_has_good_model[~tar_id_has_good_model].index.to_list()
-            df = df[~df['tar_id'].isin(no_good_model_tar_ids)]
+            df['wer'] = df['we'] / df['w']
+            df['baseline_wer'] = df['baseline_we'] / df['w']
+            df = df[((df['wer'] < self.cfg.good_wer_threshold) & 
+                    (df['baseline_wer'] > self.cfg.bad_wer_threshold) 
+                    | 
+                    (df['baseline_wer'] < self.cfg.good_wer_threshold) &
+                    (df['wer'] > self.cfg.bad_wer_threshold))]
+                
+            df['RouterLabel'] = (df['we'] < df['baseline_we']).astype(int)  # TODO: add we-difference buffer for less noisy labels
+            
+            dataset_columns = ['tar_id', 'features_path', 'w', 'Model', 'we', 'instruction_type', 'RouterLabel', 'baseline_we']
+            df = df[dataset_columns]
+            
         else:
             raise NotImplemented(f'Currently only supporting "HardBinaryRouterLabels"')
         
-        return df        
+        print('===============================')
+        print(df['RouterLabel'].value_counts())
+        print('===============================')
+        
+        self.dataset_df = df        
 
     def __len__(self):
         len_ = self.cfg.get('len_', None)
@@ -78,7 +123,7 @@ class MultiRouterDataset(Dataset):
         if self.cfg.get('use_mini_batch_per_model', False):
             num_models_per_batch = self.cfg.num_models_per_batch
             models_for_batch = random.sample(self.model_names_list, num_models_per_batch)
-            
+
             per_model_mini_batch_size = self.cfg.per_model_mini_batch_size
             full_batch_df = self.dataset_df[self.dataset_df['Model'].isin(models_for_batch)].groupby('Model').sample(n=per_model_mini_batch_size)
             
@@ -109,12 +154,3 @@ class MultiRouterDataset(Dataset):
         baseline_we = torch.stack(baseline_we)
         return tar_id, x, router_label, model_name, instruction_type, w, we, baseline_we
 
-
-if __name__ == '__main__':
-    import pandas as pd
-    dataset_df = pd.read_pickle('router_dataset_v1.pkl')
-    ds = MultiRouterDataset(dataset_df)
-    tar_id, x, router_label, model_name, instruction_type, w, we = ds[0]
-
-
-        

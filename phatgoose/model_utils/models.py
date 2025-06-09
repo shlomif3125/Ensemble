@@ -97,13 +97,18 @@ class MultiRouterModel(pl.LightningModule):
                       precision_metric,
                       roc_auc_metric
                       ]:
-            instruction_type_wers, metric_name = metric(self.validation_results_df)
-            for k, v in instruction_type_wers.items():
-                self.log(f'val_{metric_name}/{k}', v)
             
-            instruction_type_wers, metric_name = metric(self.test_results_df)
-            for k, v in instruction_type_wers.items():
-                self.log(f'test_{metric_name}/{k}', v)        
+            if not self.validation_results_df.empty:
+                instruction_type_wers, metric_name = metric(self.validation_results_df)
+                if instruction_type_wers:
+                    for k, v in instruction_type_wers.items():
+                        self.log(f'val_{metric_name}/{k}', v)
+                
+            if not self.test_results_df.empty:
+                instruction_type_wers, metric_name = metric(self.test_results_df)
+                if instruction_type_wers:
+                    for k, v in instruction_type_wers.items():
+                        self.log(f'test_{metric_name}/{k}', v)        
     
     def configure_optimizers(self):
         opt = torch.optim.Adam(self.parameters(), self.cfg.optim.lr)
