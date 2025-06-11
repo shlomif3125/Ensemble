@@ -15,9 +15,7 @@ class MultiRouterModel(pl.LightningModule):
         super(MultiRouterModel, self).__init__()
         self.cfg = model_cfg
 
-        module_dict = nn.ModuleDict({model_name: build_router_model(model_cfg.backbone) 
-                                     for model_name in model_cfg.model_names_list})
-        self.module_dict = module_dict
+        self.router_model = build_router_model(model_cfg.backbone)
         
         self.loss = nn.BCEWithLogitsLoss()   
         results_df_columns = ['tar_id', 'Model', 'RouterLabel','Score', 'instruction_type', 'w', 'we', 'baseline_we']
@@ -31,18 +29,13 @@ class MultiRouterModel(pl.LightningModule):
     def calc_wer(w_we_df):
         return w_we_df['we'].sum() / w_we_df['w'].sum()
 
-    def forward(self, x, model_names):
-        if len(set(model_names)) == 1:
-            m = self.module_dict[model_names[0]]
-            out = m(x)
-        else:
-            # TODO: group by model-name, and restore original order afterwards, to gain mini-batches utilization
-            out = torch.cat([self.module_dict[mn](x[i:i+1]) for i, mn in enumerate(model_names)], dim=0)
+    def forward(self, x):
+        out = self.router_model(x)
         return out
     
     def training_step(self, batch, batch_idx=0):
-        _, x, router_labels, model_names, *_ = batch
-        out = self.forward(x, model_names)
+        _, x, router_labels, *_ = batch
+        out = self.forward(x)
         y = torch.nn.functional.one_hot(router_labels.to(torch.int64), 2).to(torch.float32)
         loss = self.loss(out, y)
         self.log('loss', loss)
@@ -54,7 +47,7 @@ class MultiRouterModel(pl.LightningModule):
         
     def validation_step(self, batch, batch_idx=0, dataloader_idx=0):
         tar_ids, x, router_labels, model_names, instruction_types, ws, wes, baseline_wes = batch
-        out = self.forward(x, model_names)
+        out = self.forward(x)
         y = torch.nn.functional.one_hot(router_labels.to(torch.int64), 2).to(torch.float32)
         loss = self.loss(out, y)
         # loss = self.loss(out, router_labels.to(torch.float32))
@@ -111,7 +104,8 @@ class MultiRouterModel(pl.LightningModule):
                         self.log(f'test_{metric_name}/{k}', v)        
     
     def configure_optimizers(self):
-        opt = torch.optim.Adam(self.parameters(), self.cfg.optim.lr)
+        weight_decay = self.cfg.optim.get('weight_decay', 0.0)
+        opt = torch.optim.Adam(self.parameters(), lr=self.cfg.optim.lr, weight_decay=weight_decay)
         return opt
 
     

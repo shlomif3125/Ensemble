@@ -27,16 +27,18 @@ def main(cfg):
     
     logging.info('Creating train dataset...')
     data_cfg = cfg.data
-    train_ds = MultiRouterDataset(data_cfg.train)
-    if data_cfg.train.get('use_mini_batch_per_model', False):
-        collate_fn = train_ds.already_batched_collate_fn
+    
+    train_cfg = data_cfg.train
+    train_ds = MultiRouterDataset(train_cfg)
+    if train_cfg.get('pos_neg_ratio', None) is not None:
+        train_collate_fn = MultiRouterDataset.already_batched_collate_fn
         batch_size = 1
     else:
-        collate_fn = train_ds.collate_fn
-        batch_size = data_cfg.train.batch_size
+        train_collate_fn = train_ds.collate_fn
+        batch_size = train_cfg.batch_size
     
-    train_dl = DataLoader(train_ds, batch_size, collate_fn=collate_fn, shuffle=True, drop_last=True, 
-                          num_workers=data_cfg.num_workers, pin_memory=data_cfg.pin_memory)
+    train_dl = DataLoader(train_ds, batch_size, collate_fn=train_collate_fn, shuffle=True, drop_last=True, 
+                          num_workers=train_cfg.num_workers, pin_memory=data_cfg.pin_memory)
 
     val_dls = []
     val_dl_names = []
@@ -45,8 +47,8 @@ def main(cfg):
     logging.info('Creating val dataset...')   
     val_cfg = data_cfg.validation
     val_ds = MultiRouterDataset(val_cfg)
-    val_dl = DataLoader(val_ds, val_cfg.batch_size, collate_fn=train_ds.collate_fn, shuffle=False, drop_last=False, 
-                            num_workers=data_cfg.num_workers, pin_memory=data_cfg.pin_memory)
+    val_dl = DataLoader(val_ds, val_cfg.batch_size, collate_fn=MultiRouterDataset.collate_fn, shuffle=False, drop_last=False, 
+                            num_workers=val_cfg.num_workers, pin_memory=data_cfg.pin_memory)
     val_dls.append(val_dl)
     val_dl_names.append('val')
     val_dl_types.append('val')
@@ -62,8 +64,8 @@ def main(cfg):
     logging.info('Creating test dataset...')
     test_cfg = data_cfg.test
     test_ds = MultiRouterDataset(test_cfg)
-    test_dl = DataLoader(test_ds, val_cfg.batch_size, collate_fn=train_ds.collate_fn, shuffle=False, drop_last=False, 
-                            num_workers=data_cfg.num_workers, pin_memory=data_cfg.pin_memory)
+    test_dl = DataLoader(test_ds, test_cfg.batch_size, collate_fn=MultiRouterDataset.collate_fn, shuffle=False, drop_last=False, 
+                            num_workers=test_cfg.num_workers, pin_memory=data_cfg.pin_memory)
     val_dls.append(test_dl)
     val_dl_names.append('test')
     val_dl_types.append('test')

@@ -4,6 +4,10 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 import logging
+import warnings
+from pandas.errors import SettingWithCopyWarning
+
+warnings.simplefilter('ignore', SettingWithCopyWarning)
 
 
 class MultiRouterDataset(Dataset):
@@ -83,9 +87,9 @@ class MultiRouterDataset(Dataset):
         else:
             raise NotImplemented(f'Currently only supporting "HardBinaryRouterLabels"')
         
-        print('===============================')
-        print(df['RouterLabel'].value_counts())
-        print('===============================')
+        # print('===============================')
+        # print(df['RouterLabel'].value_counts())
+        # print('===============================')
         
         self.dataset_df = df        
 
@@ -120,19 +124,18 @@ class MultiRouterDataset(Dataset):
 
     def __getitem__(self, idx):
         
-        if self.cfg.get('use_mini_batch_per_model', False):
-            num_models_per_batch = self.cfg.num_models_per_batch
-            models_for_batch = random.sample(self.model_names_list, num_models_per_batch)
-
-            per_model_mini_batch_size = self.cfg.per_model_mini_batch_size
-            full_batch_df = self.dataset_df[self.dataset_df['Model'].isin(models_for_batch)].groupby('Model').sample(n=per_model_mini_batch_size)
-            
-            full_batch_size = num_models_per_batch * per_model_mini_batch_size
-            assert len(full_batch_df) == full_batch_size, f'{len(full_batch_df)}, {full_batch_size}'
-            batch_samples = [self.get_sample_from_row(full_batch_df.iloc[i]) for i in range(full_batch_size)]
+        pos_neg_ratio = self.cfg.get('pos_neg_ratio', None)
+        if pos_neg_ratio is not None:
+            batch_size = self.cfg.batch_size
+            num_pos = int(batch_size * pos_neg_ratio)
+            num_neg = batch_size - num_pos
+            pos_df = self.dataset_df[self.dataset_df['RouterLabel'] == 1].sample(n=num_pos)
+            neg_df = self.dataset_df[self.dataset_df['RouterLabel'] == 0].sample(n=num_neg)
+            batch_df = pd.concat([pos_df, neg_df])
+            batch_samples = [self.get_sample_from_row(batch_df.iloc[i]) for i in range(batch_size)]
             batch = self.collate_fn(batch_samples)
             return batch
-
+                    
         else:
             row = self.dataset_df.iloc[idx]
             return self.get_sample_from_row(row)

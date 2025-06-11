@@ -1,10 +1,10 @@
 
 manifests_dir: /mnt/ML/Personalized/shlomi.fenster/Onboarding/Ensemble/Data/one_million_data
-main_exps_dir: /mnt/ML/ModelsTrainResults/shlomi.fenster/Ensemble/PHATGOOSE
-exp_group: single_model_balancing_classes
-exp_num: 10
+main_exps_dir: /mnt/ML/ModelsTrainResults/shlomi.fenster/Ensemble/PHATGOOSE/
+exp_group: unified_models_all
+exp_num: 3
 # exp_name: ${data.model_names}__layer_${data.features_from_layer}__LR_${model.optim.lr}__Backbone_${model.backbone.type}__NumSA_${model.backbone.num_self_attention_layers}__AccumBatch_${trainer.accumulate_grad_batches}
-exp_name: ${data.model_names}__layer_${data.features_from_layer}__LR_${model.optim.lr}__Backbone_${model.backbone.type}__AccumBatch_${trainer.accumulate_grad_batches}__ClassRatio_${data.train.pos_neg_ratio}
+exp_name: all_25_models_unified__layer_${data.features_from_layer}__LR_${model.optim.lr}__Backbone_${model.backbone.type}__AccumBatch_${trainer.accumulate_grad_batches}
 full_exp_name: ${exp_group}/exp_${exp_num}/${exp_name}
 
 model:
@@ -18,13 +18,37 @@ model:
     # num_self_attention_layers: 2
   optim:
     lr: 1e-5
-    weight_decay: 1e-4
-
 
 data:
-  model_names: asaf_kagan
+  model_names: 
+  - asaf_kagan
+  - avi_barliya
+  - aviad_maizels
+  - bamboo_sleeper
+  - christopher_gray
+  - daniel_asherov
+  - dennis_fuentes
+  - diver_express
+  - doron_gazit
+  - eran_roll
+  - face_body
+  - guy_maich
+  - leonid_pakman
+  - lodge_kudzu
+  - merry_reef
+  - natural_buyout
+  - nila_ko
+  - rani_alon
+  - sourabh_katare
+  - tributary_glowing
+  - truss_odious
+  - university_toasted
+  - viva_press
+  - wendy_tan
+  - yonatan_wexler
+  unify_models: true
   baseline_model_name: baseline_model
-  num_workers: 8
+  num_workers: 12
   batch_size: 32
   pin_memory: true
   features_from_layer: 11
@@ -33,33 +57,36 @@ data:
     len_: 100000
     manifest_filepath: ${manifests_dir}/train__model_${data.features_from_model}__layer_${data.features_from_layer}_features.pkl
     model_names: ${data.model_names}
+    unify_models: ${data.unify_models}
     baseline_model_name: ${data.baseline_model_name}
     labeling: HardBinaryRouterLabels
     max_sample_wer: 0.5
     shuffle: True
-    num_workers: ${data.num_workers}
     batch_size: 64
-    pos_neg_ratio: 0.5
+    use_mini_batch_per_model: True
+    per_model_mini_batch_size: 64  # 8
+    num_models_per_batch: 1  # 8
 
   validation:
     manifest_filepath: ${manifests_dir}/val__model_${data.features_from_model}__layer_${data.features_from_layer}_features.pkl
     model_names: ${data.model_names}
+    unify_models: ${data.unify_models}
     baseline_model_name: ${data.baseline_model_name}
     labeling: ${data.train.labeling}
-    max_sample_wer: 2.
+    max_sample_wer: 1.
     shuffle: False
     num_workers: ${data.num_workers}
     batch_size: 64
 
   test:
+    batch_size: ${data.validation.batch_size}
     manifest_filepath: ${manifests_dir}/test__model_${data.features_from_model}__layer_${data.features_from_layer}_features_25k__NEW.pkl
     model_names: ${data.model_names}
+    unify_models: ${data.unify_models}
     baseline_model_name: ${data.baseline_model_name}
     labeling: ${data.train.labeling}
-    max_sample_wer: 2.
+    max_sample_wer: 1.
     shuffle: False
-    num_workers: ${data.num_workers}
-    batch_size: ${data.validation.batch_size}
 
 
 trainer:
@@ -73,11 +100,11 @@ trainer:
     dirpath: ${trainer.exp_dir}/checkpoints
     every_n_train_steps: 1000 
     every_n_epochs: null
-    monitor: val_ThresholdedTopScoringRouterChoice/silent
-    # mode: min
-    mode: max
+    monitor: test_ThresholdedTopScoringRouterChoice/lip
+    mode: min
+    # mode: max
     save_top_k: 5
-    filename: 'step={step}-val_thresholded_top_scoring_router_choice__silent={test_ROCAuCScore_0.5Thresh/silent:.3f}'
+    filename: 'step={step}-test_thresholded_top_scoring_router_choice__silent={test_ThresholdedTopScoringRouterChoice/lip:.3f}'
     # filename: 'step={step}-val_thresholded_top_scoring_router_choice__silent={val_ThresholdedTopScoringRouterChoice/silent:.3f}'
     auto_insert_metric_name: false
 
@@ -97,12 +124,16 @@ hydra:
   sweeper:
     # shuffle: true
     params:  # place all the parameters you wish to search over here (corresponding to the rest of the config)
-      data.model_names: asaf_kagan,avi_barliya,aviad_maizels,bamboo_sleeper,christopher_gray,daniel_asherov ,dennis_fuentes,diver_express,doron_gazit,eran_roll,face_body,guy_maich,leonid_pakman,lodge_kudzu,merry_reef,natural_buyout,nila_ko,rani_alon,sourabh_katare,tributary_glowing,truss_odious,university_toasted,viva_press,wendy_tan,yonatan_wexler
+      # data.model_names: natural_buyout, aviad_maizels, asaf_kagan, avi_barliya, aviad_maizels, bamboo_sleeper, christopher_gray,daniel_asherov #,dennis_fuentes,diver_express,doron_gazit,eran_roll,face_body,guy_maich,leonid_pakman,lodge_kudzu,merry_reef,natural_buyout,nila_ko,rani_alon,sourabh_katare,tributary_glowing,truss_odious,university_toasted,viva_press,wendy_tan,yonatan_wexler
       # data.model_names: asaf_kagan, aviad_maizels, natural_buyout, tributary_glowing
-      model.optim.lr: 1e-5, 1e-6
-      trainer.accumulate_grad_batches: 16
-      data.features_from_layer: 11
-      # model.backbone.num_self_attention_layers: 1, 2
+     
+      data.train.num_models_per_batch: 1
+      data.train.per_model_mini_batch_size: 64
+      model.optim.lr: 1e-4, 1e-5
+      trainer.accumulate_grad_batches: 1, 4, 16
+      data.features_from_layer: 0, 11
+     
+#       # model.backbone.num_self_attention_layers: 1, 2
 
 
 
@@ -115,11 +146,11 @@ hydra:
     tasks_per_node: 1 
     qos: normal
     timeout_min: 6000  # 10 hours is enough for my purposes...
-    # name: ${exp_name}
-    name: ${hydra.job.override_dirname}
+    name: ${exp_name}
+    # name: ${hydra.job.override_dirname}
     submitit_folder: /mnt/ML/Personalized/shlomi.fenster/slurm_logs/NeMo/Ensemble/PHATGOOSE/${hydra.launcher.name}
 
-    array_parallelism: 25
+    array_parallelism: 24
     shuffle: true
 
 
